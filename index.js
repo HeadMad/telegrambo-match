@@ -1,0 +1,1 @@
+export {default as setLogger} from "./src/setLogger.js";

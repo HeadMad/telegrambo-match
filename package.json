@@ -1,0 +1,29 @@
+{
+  "name": "telegrambo-extension-name",
+  "version": "0.0.0",
+  "description": "Description for telegrambo extension",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "test": "nodemon --env-file .env ./test.js"
+  },
+  "keywords": [
+    "telegrambo",
+    "extension"
+  ],
+  "author": "author",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/author/telegrambo-extension-name.git"
+  },
+  "bugs": {
+    "url": "https://github.com/author/telegrambo-extension-name/issues"
+  },
+  "homepage": "https://github.com/author/telegrambo-extension-name#readme",
+  "license": "MIT",
+  "devDependencies": {
+    "nodemon": "^3.1.11",
+    "telegrambo": "^1.2.2",
+    "telegrambo-polling": "^1.0.0"
+  }
+}
