@@ -1,7 +1,7 @@
 {
-  "name": "telegrambo-extension-name",
-  "version": "0.0.0",
-  "description": "Description for telegrambo extension",
+  "name": "telegrambo-match",
+  "version": "0.1.0",
+  "description": "match property for telegrambo library",
   "main": "index.js",
   "type": "module",
   "scripts": {
@@ -9,17 +9,19 @@
   },
   "keywords": [
     "telegrambo",
-    "extension"
+    "plugin",
+    "onMatch",
+    "match"
   ],
-  "author": "author",
+  "author": "HeadMad",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/author/telegrambo-extension-name.git"
+    "url": "git+https://github.com/HeadMad/telegrambo-match.git"
   },
   "bugs": {
-    "url": "https://github.com/author/telegrambo-extension-name/issues"
+    "url": "https://github.com/HeadMad/telegrambo-match/issues"
   },
-  "homepage": "https://github.com/author/telegrambo-extension-name#readme",
+  "homepage": "https://github.com/HeadMad/telegrambo-match#readme",
   "license": "MIT",
   "devDependencies": {
     "nodemon": "^3.1.11",
