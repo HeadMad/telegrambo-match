@@ -1,6 +1,9 @@
 export default {
   events: ['callback_query'],
-  plugin: (ctx, check, eventName) => {
+  plugin: (ctx, eventName, plugins) => {
+    if (!('data' in ctx))
+      return;
+
     const data = ctx.data;
     let action = data;
     let params = [];
@@ -12,6 +15,14 @@ export default {
       params = JSON.parse(data.substring(offset));
     }
 
-    check(action.trim())(ctx, ...params);
+    return (pattern, handler) => {
+      const trimmedAction = action.trim();
+      
+      if (typeof pattern === 'string' && pattern === trimmedAction)
+        return handler(ctx, ...params);
+      
+      if (pattern.constructor.name === 'RegExp' && pattern.test(trimmedAction))
+        return handler(ctx, ...params);
+    };
   }
 }

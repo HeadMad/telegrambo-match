@@ -1,19 +1,49 @@
 # Text Matcher
 
-Match messages by text patterns (strings or regular expressions).
+Match messages by text patterns. Works with both regular messages and channel posts with captions.
+
+## Supported Pattern Types
+
+- **String**: Exact text match
+  ```js
+  { text: 'hello' }
+  ```
+- **RegExp**: Regex pattern matching
+  ```js
+  { text: /^hello/i }
+  ```
+- **Function**: Custom matching logic
+  ```js
+  { text: (value) => value.length > 5 }
+  ```
 
 ## Plugin Structure
 
 ```js
 export default {
-  events: ['message'],
-  plugin: (ctx, check, eventName) => {
-    if ('text' in ctx) {
-      return check(ctx.text)(ctx, ctx.text);
-    }
+  events: ['message', 'channel_post'],
+  plugin: (ctx, eventName, plugins) => {
+    // Get text from message or caption
+    const value = ctx.text || ctx.caption;
+    
+    if (!value) return;
+    
+    // Return matcher function (MUST return handler result)
+    return (pattern, handler) => {
+      if (typeof pattern === 'string' && pattern === value)
+        return handler(ctx, value);  // ⚠️ MUST return
+      
+      if (pattern instanceof RegExp && pattern.test(value))
+        return handler(ctx, value);  // ⚠️ MUST return
+      
+      if (typeof pattern === 'function' && pattern(value))
+        return handler(ctx, value);  // ⚠️ MUST return
+    };
   }
 }
 ```
+
+⚠️ **Important**: Handler result MUST be returned for compatibility with composite plugins like `all()` and `any()`.
 
 ## Initialization
 

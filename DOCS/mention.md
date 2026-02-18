@@ -1,25 +1,55 @@
 # Mention Matcher
 
-Match @username mentions in messages.
+Match @username mentions in messages and captions.
+
+## Supported Pattern Types
+
+- **String**: Exact mention match
+  ```js
+  { mention: '@username' }
+  ```
+- **RegExp**: Regex pattern matching
+  ```js
+  { mention: /@admin/ }
+  ```
 
 ## Plugin Structure
 
 ```js
 export default {
-  events: ['message'],
-  plugin: (ctx, check, eventName) => {
-    if (!('entities' in ctx) || !ctx.text)
-      return;
+  events: ['message', 'channel_post'],
+  plugin: (ctx, eventName, plugins) => {
+    const text = ctx.text || ctx.caption;
+    const entities = ctx.entities || ctx.caption_entities;
 
-    for (const entity of ctx.entities) {
+    if (!entities || !text) return;
+
+    const foundMentions = [];
+    
+    for (const entity of entities) {
       if (entity.type === 'mention') {
-        const value = ctx.text.slice(entity.offset, entity.offset + entity.length);
-        check(value)(ctx, value);
+        const value = text.slice(entity.offset, entity.offset + entity.length);
+        foundMentions.push(value);
       }
     }
+
+    if (!foundMentions.length) return;
+
+    // Return matcher function (MUST return handler result)
+    return (pattern, handler) => {
+      for (const mention of foundMentions) {
+        if (typeof pattern === 'string' && pattern === mention)
+          return handler(ctx, mention);  // ⚠️ MUST return
+        
+        if (pattern instanceof RegExp && pattern.test(mention))
+          return handler(ctx, mention);  // ⚠️ MUST return
+      }
+    };
   }
 }
 ```
+
+⚠️ **Important**: Handler result MUST be returned for compatibility with composite plugins like `all()` and `any()`.
 
 ## Initialization
 
@@ -36,11 +66,11 @@ bot.match = setMatch({
 
 ```js
 bot.match.mention('@username', (ctx, mention) => {
-  console.log('Mentioned:', mention);
+  ctx.sendMessage({ text: `You mentioned: ${mention}` });
 });
 
 bot.match.mention('@admin', (ctx, mention) => {
-  ctx.sendMessage({ text: `You mentioned ${mention}!` });
+  ctx.sendMessage({ text: 'Admin notification sent' });
 });
 ```
 
@@ -48,14 +78,6 @@ bot.match.mention('@admin', (ctx, mention) => {
 
 - `ctx` - The context object with message data
 - `mention` - The mentioned username including @ (e.g., `@username`)
-
-## How It Works
-
-The mention matcher:
-1. Checks if the message contains `mention` entities
-2. Extracts the mention text from the message using entity offset and length
-3. Calls registered handlers for matching mentions
-4. All matching handlers are called (not just the first one)
 
 ## Examples
 
@@ -70,7 +92,7 @@ bot.match.mention('@admin', (ctx, mention) => {
 ### Log All Mentions
 
 ```js
-bot.match.mention('@', (ctx, mention) => {
+bot.match.mention(/@\w+/, (ctx, mention) => {
   console.log(`User mentioned: ${mention}`);
 });
 ```
@@ -93,8 +115,7 @@ bot.match
 ### Mention in Group Chat
 
 ```js
-bot.match.mention('@', (ctx, mention) => {
-  // In a group, notify admins of mentions
+bot.match.mention(/@\w+/, (ctx, mention) => {
   if (ctx.chat.type === 'group' || ctx.chat.type === 'supergroup') {
     console.log(`${ctx.from.username} mentioned ${mention} in ${ctx.chat.title}`);
   }
@@ -104,89 +125,28 @@ bot.match.mention('@', (ctx, mention) => {
 ### Regex Pattern Matching
 
 ```js
-// Match any mention (using regex)
+// Match any mention
 bot.match.mention(/@\w+/, (ctx, mention) => {
   ctx.sendMessage({ text: `Found mention: ${mention}` });
 });
 ```
 
-## Message Structure
-
-When a message contains mentions, Telegram provides entity data:
+### With composite plugin
 
 ```js
-{
-  text: "Hey @admin and @support check this out",
-  entities: [
-    { type: "mention", offset: 4, length: 6 },   // @admin
-    { type: "mention", offset: 15, length: 8 }   // @support
-  ]
-}
-```
-
-The mention matcher extracts these automatically.
-
-## Common Patterns
-
-### Mention Notification System
-
-```js
-const mentionedUsers = new Set();
-
-bot.match.mention(/@\w+/, (ctx, mention) => {
-  mentionedUsers.add(mention);
-  
-  if (mentionedUsers.size >= 3) {
-    ctx.sendMessage({ text: 'Too many mentions!' });
-    mentionedUsers.clear();
-  }
+// Match mentions only in specific chat
+bot.match.all([
+  { mention: /@admin/ },
+  { chat: GROUP_CHAT_ID }
+], (ctx, mention) => {
+  ctx.sendMessage({ text: `Admin mentioned in group: ${mention}` });
 });
 ```
-
-### Mention Reply
-
-```js
-bot.match.mention('@me', (ctx, mention) => {
-  ctx.sendMessage({ text: 'Yes, I am here! 👋' });
-});
-```
-
-### Mention Counter
-
-```js
-const mentionStats = {};
-
-bot.match.mention(/@\w+/, (ctx, mention) => {
-  mentionStats[mention] = (mentionStats[mention] || 0) + 1;
-});
-```
-
-### Conditional Mention Handler
-
-```js
-bot.match.mention('@admin', (ctx, mention) => {
-  // Check if user is authorized to mention admin
-  if (ctx.from.id === ADMIN_ID) {
-    ctx.sendMessage({ text: 'Admin already here!' });
-  } else {
-    ctx.sendMessage({ text: 'Admin has been notified' });
-    // Send notification to admin
-  }
-});
-```
-
-## Entity Structure
-
-Telegram provides mention entities with:
-- `type` - Always "mention" for this matcher
-- `offset` - Position in text where mention starts
-- `length` - Length of the mention text (including @)
 
 ## Notes
 
 - Mentions must start with `@` character
 - Mentions are case-sensitive in matching
-- Multiple mentions in one message trigger handler multiple times
+- Multiple mentions in one message trigger the handler multiple times
 - Works in private chats, groups, and channels
-- Requires message to have text and entities
-- The mention includes the @ symbol
+- Works with both message text and channel post captions

@@ -2,6 +2,19 @@
 
 Match messages by media type (photo, video, audio, document, etc.).
 
+## Supported Pattern Types
+
+- **String**: Exact media type match
+  ```js
+  { media: 'photo' }
+  { media: 'video' }
+  { media: 'document' }
+  ```
+- **RegExp**: Regex pattern matching
+  ```js
+  { media: /photo|video/ }
+  ```
+
 ## Plugin Structure
 
 ```js
@@ -9,15 +22,24 @@ const MEDIA_TYPES = ['photo', 'video', 'audio', 'document', 'voice', 'video_note
 
 export default {
   events: ['message'],
-  plugin: (ctx, check, eventName) => {
+  plugin: (ctx, eventName, plugins) => {
     for (const mediaType of MEDIA_TYPES) {
       if (mediaType in ctx) {
-        check(mediaType)(ctx, mediaType);
+        // Return matcher function (MUST return handler result)
+        return (pattern, handler) => {
+          if (typeof pattern === 'string' && pattern === mediaType)
+            return handler(ctx, mediaType);  // ⚠️ MUST return
+          
+          if (pattern instanceof RegExp && pattern.test(mediaType))
+            return handler(ctx, mediaType);  // ⚠️ MUST return
+        };
       }
     }
   }
 }
 ```
+
+⚠️ **Important**: Handler result MUST be returned for compatibility with composite plugins like `all()` and `any()`.
 
 ## Initialization
 
@@ -34,17 +56,18 @@ bot.match = setMatch({
 
 ```js
 bot.match.media('photo', (ctx, type) => {
-  console.log('Photo received:', type);
+  ctx.sendMessage({ text: 'Photo received!' });
 });
 
 bot.match.media('video', (ctx, type) => {
-  console.log('Video received:', type);
-});
-
-bot.match.media('document', (ctx, type) => {
-  console.log('Document received:', type);
+  ctx.sendMessage({ text: 'Video received!' });
 });
 ```
+
+## Handler Parameters
+
+- `ctx` - The context object with message data
+- `type` - The media type (e.g., `photo`, `video`, `audio`)
 
 ## Supported Media Types
 
@@ -57,18 +80,13 @@ bot.match.media('document', (ctx, type) => {
 - `animation` - GIF animation
 - `sticker` - Sticker
 
-## Handler Parameters
-
-- `ctx` - The context object with message data
-- `type` - The media type (e.g., `photo`, `video`, `audio`)
-
 ## Examples
 
 ### Handling Photos
 
 ```js
 bot.match.media('photo', (ctx, type) => {
-  const photo = ctx.photo[ctx.photo.length - 1]; // Get largest photo
+  const photo = ctx.photo[ctx.photo.length - 1];
   ctx.sendMessage({ text: `Photo received! ID: ${photo.file_id}` });
 });
 ```
@@ -77,7 +95,7 @@ bot.match.media('photo', (ctx, type) => {
 
 ```js
 bot.match.media('document', (ctx, type) => {
-  ctx.sendMessage({ text: `Document: ${ctx.document.file_name} (${ctx.document.file_size} bytes)` });
+  ctx.sendMessage({ text: `Document: ${ctx.document.file_name}` });
 });
 ```
 
@@ -85,7 +103,7 @@ bot.match.media('document', (ctx, type) => {
 
 ```js
 bot.match.media('voice', (ctx, type) => {
-  ctx.sendMessage({ text: `Voice message: ${ctx.voice.duration} seconds` });
+  ctx.sendMessage({ text: `Voice message: ${ctx.voice.duration}s` });
 });
 ```
 
@@ -101,10 +119,15 @@ bot.match
   })
   .media('audio', (ctx, type) => {
     ctx.sendMessage({ text: 'Audio received!' });
-  })
-  .media('document', (ctx, type) => {
-    ctx.sendMessage({ text: 'Document received!' });
   });
+```
+
+### Regex pattern matching
+
+```js
+bot.match.media(/photo|video|document/, (ctx, type) => {
+  ctx.sendMessage({ text: `Media type: ${type}` });
+});
 ```
 
 ### File Size Validation
@@ -118,130 +141,25 @@ bot.match.media('document', (ctx, type) => {
     return;
   }
   
-  ctx.sendMessage({ text: 'File received and accepted!' });
+  ctx.sendMessage({ text: 'File accepted!' });
 });
 ```
 
-## Media Object Structure
-
-Each media type provides different properties:
-
-### Photo
+### With composite plugin
 
 ```js
-{
-  file_id: "string",
-  file_unique_id: "string",
-  width: number,
-  height: number,
-  file_size: number (optional)
-}
-```
-
-### Video
-
-```js
-{
-  file_id: "string",
-  file_unique_id: "string",
-  width: number,
-  height: number,
-  duration: number,
-  thumbnail: PhotoSize (optional),
-  mime_type: "string" (optional),
-  file_size: number (optional)
-}
-```
-
-### Audio
-
-```js
-{
-  file_id: "string",
-  file_unique_id: "string",
-  duration: number,
-  performer: "string" (optional),
-  title: "string" (optional),
-  mime_type: "string" (optional),
-  file_size: number (optional)
-}
-```
-
-### Document
-
-```js
-{
-  file_id: "string",
-  file_unique_id: "string",
-  thumbnail: PhotoSize (optional),
-  file_name: "string" (optional),
-  mime_type: "string" (optional),
-  file_size: number (optional)
-}
-```
-
-### Voice
-
-```js
-{
-  file_id: "string",
-  file_unique_id: "string",
-  duration: number,
-  mime_type: "string" (optional),
-  file_size: number (optional)
-}
-```
-
-## Common Patterns
-
-### File Type Validation
-
-```js
-bot.match.media('document', (ctx, type) => {
-  const mimeType = ctx.document.mime_type;
-  
-  if (mimeType === 'application/pdf') {
-    ctx.sendMessage({ text: 'PDF received!' });
-  } else if (mimeType.startsWith('image/')) {
-    ctx.sendMessage({ text: 'Image document received!' });
-  } else {
-    ctx.sendMessage({ text: 'Other document type' });
-  }
+// Accept media only in specific chat
+bot.match.all([
+  { media: /photo|video/ },
+  { chat: MEDIA_CHANNEL_ID }
+], (ctx, type) => {
+  ctx.sendMessage({ text: `${type} added to channel` });
 });
 ```
-
-### Media Download
-
-```js
-bot.match.media('photo', (ctx, type) => {
-  const fileId = ctx.photo[ctx.photo.length - 1].file_id;
-  // Use fileId to download via Telegram API
-  ctx.sendMessage({ text: 'Photo saved!' });
-});
-```
-
-### Gallery Handler
-
-```js
-bot.match
-  .media('photo', handleMedia)
-  .media('video', handleMedia)
-  .media('animation', handleMedia);
-
-function handleMedia(ctx, type) {
-  ctx.sendMessage({ text: `${type.toUpperCase()} added to gallery` });
-}
-```
-
-## Performance Notes
-
-- Media matching is performed on every message
-- Multiple media types in one message will trigger all matching handlers
-- Media objects can be large, consider caching file IDs
 
 ## Notes
 
-- A message can contain only one media type
+- A message can contain only one media type at a time
 - Use file_id for downloading or forwarding media
 - file_size may not be available for all media types
 - The `photo` type contains an array of PhotoSize objects (different qualities)

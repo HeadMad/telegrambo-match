@@ -1,13 +1,27 @@
 # Callback Query Matcher
 
-Match callback queries from inline buttons with support for action parsing and parameters.
+Match callback queries from inline buttons. Supports action parsing with optional parameters.
+
+## Supported Pattern Types
+
+- **String**: Exact action match
+  ```js
+  { callbackQuery: 'delete' }
+  { callbackQuery: 'like[42]' }  // With parameters in data
+  ```
+- **RegExp**: Regex pattern matching against action name
+  ```js
+  { callbackQuery: /^edit_/ }
+  ```
 
 ## Plugin Structure
 
 ```js
 export default {
   events: ['callback_query'],
-  plugin: (ctx, check, eventName) => {
+  plugin: (ctx, eventName, plugins) => {
+    if (!ctx.data) return;
+
     const data = ctx.data;
     let action = data;
     let params = [];
@@ -19,10 +33,21 @@ export default {
       params = JSON.parse(data.substring(offset));
     }
 
-    check(action.trim())(ctx, ...params);
+    // Return matcher function (MUST return handler result)
+    return (pattern, handler) => {
+      const trimmedAction = action.trim();
+      
+      if (typeof pattern === 'string' && pattern === trimmedAction)
+        return handler(ctx, ...params);  // ⚠️ MUST return
+      
+      if (pattern instanceof RegExp && pattern.test(trimmedAction))
+        return handler(ctx, ...params);  // ⚠️ MUST return
+    };
   }
 }
 ```
+
+⚠️ **Important**: Handler result MUST be returned for compatibility with composite plugins like `all()` and `any()`.
 
 ## Initialization
 
@@ -38,35 +63,12 @@ bot.match = setMatch({
 ## Usage
 
 ```js
-bot.match.callbackQuery('delete', (ctx, ...params) => {
-  ctx.answerCallbackQuery('Item deleted!');
+bot.match.callbackQuery('delete', (ctx) => {
+  ctx.answerCallbackQuery({ text: 'Item deleted!' });
 });
 
 bot.match.callbackQuery('edit_item', (ctx, itemId, action) => {
   console.log(`Edit item ${itemId} with action ${action}`);
-});
-```
-
-## Callback Data Format
-
-The plugin supports two formats:
-
-### Simple Action (no parameters)
-
-```js
-// Button callback_data: "delete"
-match.callbackQuery('delete', (ctx) => {
-  ctx.answerCallbackQuery('Deleted!');
-});
-```
-
-### Action with Parameters
-
-```js
-// Button callback_data: "edit_item[123, \"update\"]"
-match.callbackQuery('edit_item', (ctx, itemId, action) => {
-  console.log(`Item ID: ${itemId}, Action: ${action}`);
-  ctx.answerCallbackQuery(`Editing item ${itemId}`);
 });
 ```
 
@@ -75,53 +77,61 @@ match.callbackQuery('edit_item', (ctx, itemId, action) => {
 - `ctx` - The context object with callback query data
 - `...params` - Spread parameters extracted from callback data (if any)
 
-## Callback Data Structure
+## Callback Data Format
+
+The plugin supports parsing callback data with optional parameters in JSON array format:
 
 **Format:** `action[param1, param2, ...]`
 
-The plugin parses callback data as follows:
+Examples:
+```js
+'delete'                          // Simple action
+'delete[42]'                      // Action with one parameter
+'edit[123, "update"]'             // Action with multiple parameters
+'action["id", true, 3.14]'        // Various parameter types
+```
 
-1. **Extract action**: Text before `[`
-2. **Extract parameters**: JSON array between `[` and `]`
-3. **Trim action**: Remove whitespace from action
-4. **Parse JSON**: Convert JSON array to individual parameters
-
-**Examples:**
-
-| Callback Data | Action | Parameters |
-|---------------|--------|------------|
-| `"delete"` | `"delete"` | `[]` |
-| `"delete[42]"` | `"delete"` | `[42]` |
-| `"edit[123, \"update\"]"` | `"edit"` | `[123, "update"]` |
-| `"action[\"id\", true, 3.14]"` | `"action"` | `["id", true, 3.14]` |
-
-## Usage Examples
+## Examples
 
 ### Simple Actions
 
 ```js
-bot.match
-  .callbackQuery('yes', (ctx) => {
-    ctx.answerCallbackQuery({ text: 'You clicked YES' });
-  })
-  .callbackQuery('no', (ctx) => {
-    ctx.answerCallbackQuery({ text: 'You clicked NO' });
-  })
-  .callbackQuery('cancel', (ctx) => {
-    ctx.answerCallbackQuery({ text: 'Cancelled' });
-  });
+bot.match.callbackQuery('yes', (ctx) => {
+  ctx.answerCallbackQuery({ text: 'You clicked YES' });
+});
+
+bot.match.callbackQuery('no', (ctx) => {
+  ctx.answerCallbackQuery({ text: 'You clicked NO' });
+});
 ```
 
 ### Actions with Parameters
 
 ```js
+bot.match.callbackQuery('like', (ctx, postId) => {
+  ctx.answerCallbackQuery({ text: `Liked post ${postId}` });
+});
+
+bot.match.callbackQuery('comment', (ctx, postId, replyTo) => {
+  ctx.answerCallbackQuery({ text: `Replying to ${replyTo} on post ${postId}` });
+});
+```
+
+### Regex Pattern Matching
+
+```js
+bot.match.callbackQuery(/^delete_/, (ctx) => {
+  ctx.answerCallbackQuery({ text: 'Item will be deleted' });
+});
+```
+
+### Multiple Actions with Chaining
+
+```js
 bot.match
-  .callbackQuery('like', (ctx, postId) => {
-    ctx.answerCallbackQuery({ text: `Liked post ${postId}` });
-  })
-  .callbackQuery('comment', (ctx, postId, replyTo) => {
-    ctx.answerCallbackQuery({ text: `Commenting on post ${postId}, reply to ${replyTo}` });
-  });
+  .callbackQuery('yes', yesHandler)
+  .callbackQuery('no', noHandler)
+  .callbackQuery('cancel', cancelHandler);
 ```
 
 ### Creating Inline Buttons
@@ -143,36 +153,41 @@ ctx.sendMessage({
 });
 ```
 
+### With composite plugin
+
+```js
+// Handle callback only from specific chat
+bot.match.all([
+  { callbackQuery: 'approve' },
+  { chat: ADMIN_CHAT_ID }
+], (ctx) => {
+  ctx.answerCallbackQuery({ text: 'Request approved' });
+});
+```
+
 ## Type Safety with Parameters
 
 When using parameters, ensure they are valid JSON:
 
 ```js
 // ✅ Correct
-callback_data: 'action[123]'           // number
-callback_data: 'action["text"]'        // string
-callback_data: 'action[true, false]'   // boolean
-callback_data: 'action[1, "a", true]'  // mixed
+callback_data: 'action[123]'              // number
+callback_data: 'action["text"]'           // string (quoted)
+callback_data: 'action[true, false]'      // boolean
+callback_data: 'action[1, "a", true]'     // mixed types
 
 // ❌ Incorrect
-callback_data: 'action[unquoted]'      // JSON string must be quoted
-callback_data: 'action[undefined]'     // undefined is not valid JSON
+callback_data: 'action[unquoted]'         // JSON string must be quoted
+callback_data: 'action[undefined]'        // undefined is not valid JSON
 ```
-
-## Performance Notes
-
-- Action matching is exact (no regex or partial matching)
-- Whitespace in action names is trimmed
-- JSON parsing happens for each callback query
-- Keep callback_data under 64 bytes (Telegram limit)
 
 ## Common Patterns
 
 ### Pagination
 
 ```js
-// Button: callback_data: 'page[2]'
-match.callbackQuery('page', (ctx, pageNum) => {
+// callback_data: 'page[2]'
+bot.match.callbackQuery('page', (ctx, pageNum) => {
   showPage(ctx, pageNum);
 });
 ```
@@ -180,31 +195,30 @@ match.callbackQuery('page', (ctx, pageNum) => {
 ### Item Management
 
 ```js
-// Button: callback_data: 'item_delete[123]'
-match.callbackQuery('item_delete', (ctx, itemId) => {
+// callback_data: 'item_delete[123]'
+bot.match.callbackQuery('item_delete', (ctx, itemId) => {
   deleteItem(itemId);
-  ctx.answerCallbackQuery('Item deleted');
+  ctx.answerCallbackQuery({ text: 'Item deleted' });
 });
 ```
 
 ### Multi-step Actions
 
 ```js
-// Button: callback_data: 'confirm[\"delete\", 42]'
-match.callbackQuery('confirm', (ctx, action, id) => {
+// callback_data: 'confirm["delete", 42]'
+bot.match.callbackQuery('confirm', (ctx, action, id) => {
   if (action === 'delete') {
     deleteItem(id);
   } else if (action === 'archive') {
     archiveItem(id);
   }
-  ctx.answerCallbackQuery('Action completed');
+  ctx.answerCallbackQuery({ text: 'Action completed' });
 });
 ```
 
 ## Notes
 
-- The plugin requires valid JSON in parameters
-- Action names are trimmed of whitespace
-- Parameters are spread into the handler function
+- Parameters are parsed as JSON, so strings must be quoted
 - Callback data is limited to 64 bytes by Telegram
 - Always provide user feedback with `ctx.answerCallbackQuery()`
+- Parameters are spread into the handler function arguments

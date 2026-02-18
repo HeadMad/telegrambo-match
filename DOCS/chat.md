@@ -2,19 +2,55 @@
 
 Match messages and events by chat ID. Works with all event types (not just messages).
 
+## Supported Pattern Types
+
+- **Number**: Exact chat ID match
+  ```js
+  { chat: 123456789 }
+  ```
+- **String**: Chat ID as string
+  ```js
+  { chat: '123456789' }
+  ```
+- **RegExp**: Regex pattern matching against chat ID (as string)
+  ```js
+  { chat: /^-100/ }  // Supergroups and channels
+  ```
+- **Function**: Custom matching logic
+  ```js
+  { chat: (id) => id > 0 }  // Private chats only
+  ```
+
 ## Plugin Structure
 
 ```js
 export default {
   events: ['message', 'edited_message', 'channel_post', 'edited_channel_post', 'callback_query', 'my_chat_member', 'chat_member', 'chat_join_request'],
-  plugin: (ctx, check, eventName) => {
-    if (ctx.chat && ctx.chat.id !== undefined) {
-      const chatId = ctx.chat.id;
-      check(chatId)(ctx, eventName);
-    }
+  plugin: (ctx, eventName, plugins) => {
+    if (!ctx.chat || ctx.chat.id === undefined)
+      return;
+
+    const chatId = ctx.chat.id;
+
+    // Return matcher function (MUST return handler result)
+    return (pattern, handler) => {
+      if (typeof pattern === 'number' && pattern === chatId)
+        return handler(ctx, eventName);  // ⚠️ MUST return
+      
+      if (typeof pattern === 'string' && pattern === String(chatId))
+        return handler(ctx, eventName);  // ⚠️ MUST return
+      
+      if (pattern instanceof RegExp && pattern.test(String(chatId)))
+        return handler(ctx, eventName);  // ⚠️ MUST return
+      
+      if (typeof pattern === 'function' && pattern(chatId))
+        return handler(ctx, eventName);  // ⚠️ MUST return
+    };
   }
 }
 ```
+
+⚠️ **Important**: Handler result MUST be returned for compatibility with composite plugins like `all()` and `any()`.
 
 ## Initialization
 
@@ -30,7 +66,7 @@ bot.match = setMatch({
 ## Usage
 
 ```js
-// Match specific chat by ID
+// Match specific chat by ID (number)
 bot.match.chat(123456789, (ctx, eventName) => {
   console.log(`Received event "${eventName}" in chat ${ctx.chat.id}`);
 });
@@ -38,6 +74,11 @@ bot.match.chat(123456789, (ctx, eventName) => {
 // Match multiple chats using regex
 bot.match.chat(/^-100/, (ctx, eventName) => {
   console.log(`Received in supergroup/channel: ${ctx.chat.id}`);
+});
+
+// Match with function
+bot.match.chat((id) => id > 0, (ctx, eventName) => {
+  console.log(`Private chat: ${ctx.chat.id}`);
 });
 ```
 
@@ -60,48 +101,74 @@ bot.match.chat(/^-100/, (ctx, eventName) => {
 ## Features
 
 - ✅ Works with all event types (not just messages)
-- ✅ String pattern matching (exact chat ID)
+- ✅ Number pattern matching (exact chat ID)
+- ✅ String pattern matching
 - ✅ Regular expression matching (for multiple chats)
+- ✅ Function pattern matching (custom logic)
 - ✅ Access to chat info via `ctx.chat`
 - ✅ Supports chaining
 
 ## Examples
 
 ### Match specific chat
+
 ```js
-match.chat(123456789, (ctx, eventName) => {
-  console.log(`Message in my chat: ${ctx.text}`);
+bot.match.chat(123456789, (ctx, eventName) => {
+  ctx.sendMessage({ text: 'Message in my chat' });
 });
 ```
 
 ### Match supergroups and channels
+
 ```js
-match.chat(/^-100/, (ctx, eventName) => {
+bot.match.chat(/^-100/, (ctx, eventName) => {
   console.log(`Supergroup/channel event: ${eventName}`);
 });
 ```
 
-### Match private chats
+### Match private chats only
+
 ```js
-bot.match.chat(ctx => ctx.chat.type === 'private', (ctx, eventName) => {
+bot.match.chat((id) => id > 0, (ctx, eventName) => {
   ctx.sendMessage({ text: 'This is a private chat' });
 });
 ```
 
 ### Multiple chats with chaining
+
 ```js
-match
-  .chat(123456789, (ctx, evt) => { /* admin chat */ })
-  .chat(987654321, (ctx, evt) => { /* support chat */ })
-  .chat(-100111222333, (ctx, evt) => { /* channel */ });
+bot.match
+  .chat(123456789, (ctx, evt) => { 
+    // Admin chat 
+  })
+  .chat(987654321, (ctx, evt) => { 
+    // Support chat 
+  })
+  .chat(-100111222333, (ctx, evt) => { 
+    // Channel 
+  });
 ```
 
 ### Track bot status in groups
+
 ```js
-match.chat(/^-100/, (ctx, eventName) => {
+bot.match.chat(/^-100/, (ctx, eventName) => {
   if (eventName === 'my_chat_member') {
-    console.log(`Bot status changed: ${ctx.my_chat_member.new_chat_member.status}`);
+    const status = ctx.new_chat_member.status;
+    console.log(`Bot status in supergroup: ${status}`);
   }
+});
+```
+
+### With composite plugin
+
+```js
+// Match messages in specific chat AND contain text "secret"
+bot.match.all([
+  { text: 'secret' },
+  { chat: 123456789 }
+], (ctx) => {
+  ctx.sendMessage({ text: 'Secret message received' });
 });
 ```
 
@@ -109,11 +176,12 @@ match.chat(/^-100/, (ctx, eventName) => {
 
 - **Private chats**: Positive numbers (e.g., `123456789`)
 - **Groups**: Negative numbers (e.g., `-123456789`)
-- **Supergroups/Channels**: Negative with prefix (e.g., `-100123456789`)
+- **Supergroups/Channels**: Negative with 100 prefix (e.g., `-100123456789`)
 
 ## Notes
 
 - Chat matcher works across all event types, not limited to messages
 - Access chat information via `ctx.chat` property
 - Use regex patterns to match multiple chats with similar IDs
+- Use functions for complex matching logic
 - Useful for logging, admin panels, and per-chat configuration

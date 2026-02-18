@@ -32,51 +32,59 @@ const calculateSimilarity = (str1, str2) => {
 
 // Plugin factory that accepts options
 export default (options = {}) => {
-  const {
-    threshold = 0.8,
-    caseInsensitive = false,
-    trim = true
-  } = options;
+  const defaultOptions = {
+    threshold: 0.2,
+    caseInsensitive: 1,
+    trim: true
+  };
 
-  // Return plugin configuration
+  const mergeOptions = (baseOptions, overrides) => ({
+    ...baseOptions,
+    ...overrides
+  });
+
   return {
-    events: ['message'],
-    plugin: (ctx, checker, eventName) => {
-      if (!('text' in ctx))
+    events: ['message', 'channel_post'],
+    plugin: (ctx, eventName) => {
+      let text = ('text' in ctx ? ctx.text : null) || ('caption' in ctx ? ctx.caption : null);
+      
+      if (!text)
         return;
+      
+      // Determine initial trim setting
+      let currentOptions = mergeOptions(defaultOptions, options);
+      if (currentOptions.trim) text = text.trim();
 
-      let text = ctx.text;
-      if (trim) text = text.trim();
-      const comparisonText = caseInsensitive ? text.toLowerCase() : text;
+      return (pattern, handler) => {
+        // Handle both string pattern and object with value and options
+        let patternStr;
+        let matchOptions = currentOptions;
 
-      // Iterate through all patterns using checker.each()
-      checker.each((pattern, handler) => {
-        // Handle string patterns (exact similarity matching)
-        if (pattern.constructor.name !== 'RegExp') {
-          let patternStr = pattern;
-          if (caseInsensitive) patternStr = patternStr.toLowerCase();
-
-          const score = calculateSimilarity(comparisonText, patternStr);
-
-          if (score >= threshold) {
-            handler(ctx, text, score);
-          }
+        if (typeof pattern === 'string') {
+          patternStr = pattern;
+        } else if (typeof pattern === 'object' && pattern !== null && 'value' in pattern) {
+          patternStr = pattern.value;
+          // Merge initialization options with pattern-specific options
+          const patternOptions = { ...pattern };
+          delete patternOptions.value;
+          matchOptions = mergeOptions(currentOptions, patternOptions);
+        } else {
+          // Fallback for unexpected pattern format
+          patternStr = String(pattern);
         }
-        // Handle regex patterns (only check if they match)
-        else {
-          const testText = caseInsensitive ? text.toLowerCase() : text;
-          if (pattern.test(testText)) {
-            // For regex, calculate similarity against the matched text
-            const matched = text.match(pattern);
-            if (matched) {
-              const score = calculateSimilarity(comparisonText, matched[0].toLowerCase ? matched[0].toLowerCase() : matched[0]);
-              if (score >= threshold) {
-                handler(ctx, text, score);
-              }
-            }
-          }
+
+        let comparisonText = text;
+        if (matchOptions.caseInsensitive) {
+          comparisonText = text.toLowerCase();
+          patternStr = patternStr.toLowerCase();
         }
-      });
+
+        const score = calculateSimilarity(comparisonText, patternStr);
+
+        if (score >= matchOptions.threshold) {
+          return handler(ctx, text, score);
+        }
+      };
     }
   };
 }

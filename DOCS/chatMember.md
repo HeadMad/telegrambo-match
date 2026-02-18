@@ -2,19 +2,43 @@
 
 Match chat member status changes (user joins/leaves/promoted/demoted).
 
+## Supported Pattern Types
+
+- **String**: Exact member status match
+  ```js
+  { chatMember: 'member' }
+  { chatMember: 'left' }
+  { chatMember: 'kicked' }
+  { chatMember: 'administrator' }
+  ```
+- **RegExp**: Regex pattern matching
+  ```js
+  { chatMember: /member|left/ }
+  ```
+
 ## Plugin Structure
 
 ```js
 export default {
   events: ['chat_member', 'my_chat_member'],
-  plugin: (ctx, check, eventName) => {
+  plugin: (ctx, eventName, plugins) => {
     const status = ctx.new_chat_member?.status;
-    if (status) {
-      check(status)(ctx, status, ctx);
-    }
+    
+    if (!status) return;
+
+    // Return matcher function (MUST return handler result)
+    return (pattern, handler) => {
+      if (typeof pattern === 'string' && pattern === status)
+        return handler(ctx, status, ctx);  // ⚠️ MUST return
+      
+      if (pattern instanceof RegExp && pattern.test(status))
+        return handler(ctx, status, ctx);  // ⚠️ MUST return
+    };
   }
 }
 ```
+
+⚠️ **Important**: Handler result MUST be returned for compatibility with composite plugins like `all()` and `any()`.
 
 ## Initialization
 
@@ -39,15 +63,15 @@ bot.match.chatMember('left', (ctx, status, data) => {
 });
 
 bot.match.chatMember('administrator', (ctx, status, data) => {
-  ctx.reply('Admin promoted!');
+  ctx.sendMessage({ text: 'Admin promoted!' });
 });
 ```
 
 ## Handler Parameters
 
 - `ctx` - The context object with chat member data
-- `status` - The new member status (e.g., `member`, `left`, `administrator`)
-- `chatMemberData` - The full chat member object with old and new states
+- `status` - The new member status (e.g., `member`, `left`, `kicked`, `administrator`)
+- `data` - The full context object with old and new member states
 
 ## Supported Member Statuses
 
@@ -58,17 +82,13 @@ bot.match.chatMember('administrator', (ctx, status, data) => {
 - `left` - User left the chat
 - `kicked` - User was kicked from the chat
 
-## Events
-
-The plugin listens to two event types:
+## Supported Events
 
 ### `chat_member` Event
-- Triggered when ANY user's status changes in the chat
-- Useful for tracking member activities
+Triggered when ANY user's status changes in the chat. Useful for tracking member activities.
 
 ### `my_chat_member` Event
-- Triggered when the BOT's status changes in the chat
-- Useful for tracking bot's own status
+Triggered when the BOT's status changes in the chat. Useful for tracking bot's own status.
 
 ## Examples
 
@@ -136,7 +156,7 @@ bot.match.chatMember('left', (ctx, status, data) => {
 });
 ```
 
-### Multiple Status Changes
+### Multiple Status Changes with Chaining
 
 ```js
 bot.match
@@ -150,73 +170,15 @@ bot.match
     ctx.sendMessage({ text: 'User kicked' });
   })
   .chatMember('administrator', (ctx, status, data) => {
-    ctx.sendMessage({ text: 'User promoted' });
+    ctx.sendMessage({ text: 'User promoted to admin' });
   });
 ```
 
-## Chat Member Object Structure
+### Regex Pattern Matching
 
 ```js
-{
-  user: {
-    id: number,
-    is_bot: boolean,
-    first_name: string,
-    last_name: string (optional),
-    username: string (optional),
-    language_code: string (optional)
-  },
-  status: string,  // 'creator', 'administrator', 'member', 'restricted', 'left', 'kicked'
-  is_member: boolean (optional),
-  can_send_messages: boolean (optional),
-  can_send_audios: boolean (optional),
-  can_send_documents: boolean (optional),
-  can_send_photos: boolean (optional),
-  can_send_videos: boolean (optional),
-  can_send_video_notes: boolean (optional),
-  can_send_voice_notes: boolean (optional),
-  can_send_polls: boolean (optional),
-  can_send_other_messages: boolean (optional),
-  can_add_web_page_previews: boolean (optional),
-  can_change_info: boolean (optional),
-  can_invite_users: boolean (optional),
-  can_pin_messages: boolean (optional),
-  can_manage_topics: boolean (optional),
-  until_date: number (optional)
-}
-```
-
-## Common Patterns
-
-### Welcome New Members
-
-```js
-bot.match.chatMember('member', (ctx, status, data) => {
-  const user = ctx.new_chat_member.user;
-  
-  ctx.sendMessage({
-    text: `Welcome @${user.username || user.first_name}! 👋\n\nPlease introduce yourself!`,
-    reply_markup: {
-      inline_keyboard: [
-        [{ text: 'Read Rules', url: 'https://example.com/rules' }]
-      ]
-    }
-  });
-});
-```
-
-### Moderation Log
-
-```js
-const log = [];
-
-match.chatMember(/#(kicked|left|administrator)/, (ctx, status, data) => {
-  log.push({
-    timestamp: new Date(),
-    user: data.new_chat_member.user.username,
-    action: status,
-    chatId: ctx.chat.id
-  });
+bot.match.chatMember(/member|left/, (ctx, status, data) => {
+  ctx.sendMessage({ text: `Member status changed to: ${status}` });
 });
 ```
 
@@ -250,31 +212,38 @@ bot.match.chatMember('member', (ctx, status, data) => {
 });
 ```
 
-## Permissions and Restrictions
-
-The `administrator` and `restricted` statuses include permission booleans:
+### With composite plugin
 
 ```js
-match.chatMember('administrator', (ctx, status, data) => {
-  const perms = data.new_chat_member;
+// Welcome new members only in specific group
+bot.match.all([
+  { chatMember: 'member' },
+  { chat: WELCOME_GROUP_ID }
+], (ctx, status, data) => {
+  const user = ctx.new_chat_member.user;
+  ctx.sendMessage({ text: `Welcome to our group, ${user.first_name}!` });
+});
+```
+
+## Accessing Member Information
+
+Both old and new states are available:
+
+```js
+bot.match.chatMember('administrator', (ctx, status, data) => {
+  const newMember = ctx.new_chat_member;  // New state
+  const oldMember = ctx.old_chat_member;  // Old state
   
-  if (perms.can_delete_messages) {
-    console.log('Can delete messages');
-  }
-  if (perms.can_restrict_members) {
-    console.log('Can restrict members');
-  }
-  if (perms.can_promote_members) {
-    console.log('Can promote members');
-  }
+  console.log('User:', newMember.user.id);
+  console.log('Old status:', oldMember.status);
+  console.log('New status:', newMember.status);
+  console.log('Permissions:', newMember.can_delete_messages);
 });
 ```
 
 ## Notes
 
-- `chat_member` events may not be enabled by default in some chats
-- Administrator can enable/disable member status updates in group settings
-- Only group, supergroup, and channel events are supported
-- The bot must have access to see member status changes
-- Private chats do not have member status events
-- Use `my_chat_member` to track bot's own status in the chat
+- `chat_member` fires for any user status change
+- `my_chat_member` fires only for the bot's own status changes
+- Both events provide old and new member state information
+- Permissions are included in admin and restricted statuses

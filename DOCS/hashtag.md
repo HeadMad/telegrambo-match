@@ -1,25 +1,55 @@
 # Hashtag Matcher
 
-Match #hashtags in messages.
+Match #hashtags in messages and captions.
+
+## Supported Pattern Types
+
+- **String**: Exact hashtag match
+  ```js
+  { hashtag: '#python' }
+  ```
+- **RegExp**: Regex pattern matching
+  ```js
+  { hashtag: /#python|#javascript/ }
+  ```
 
 ## Plugin Structure
 
 ```js
 export default {
-  events: ['message'],
-  plugin: (ctx, check, eventName) => {
-    if (!('entities' in ctx) || !ctx.text)
-      return;
+  events: ['message', 'channel_post'],
+  plugin: (ctx, eventName, plugins) => {
+    const text = ctx.text || ctx.caption;
+    const entities = ctx.entities || ctx.caption_entities;
 
-    for (const entity of ctx.entities) {
+    if (!entities || !text) return;
+
+    const foundHashtags = [];
+    
+    for (const entity of entities) {
       if (entity.type === 'hashtag') {
-        const value = ctx.text.slice(entity.offset, entity.offset + entity.length);
-        check(value)(ctx, value);
+        const value = text.slice(entity.offset, entity.offset + entity.length);
+        foundHashtags.push(value);
       }
     }
+
+    if (!foundHashtags.length) return;
+
+    // Return matcher function (MUST return handler result)
+    return (pattern, handler) => {
+      for (const hashtag of foundHashtags) {
+        if (typeof pattern === 'string' && pattern === hashtag)
+          return handler(ctx, hashtag);  // ⚠️ MUST return
+        
+        if (pattern instanceof RegExp && pattern.test(hashtag))
+          return handler(ctx, hashtag);  // ⚠️ MUST return
+      }
+    };
   }
 }
 ```
+
+⚠️ **Important**: Handler result MUST be returned for compatibility with composite plugins like `all()` and `any()`.
 
 ## Initialization
 
@@ -36,11 +66,11 @@ bot.match = setMatch({
 
 ```js
 bot.match.hashtag('#python', (ctx, tag) => {
-  console.log('Hashtag found:', tag);
+  ctx.sendMessage({ text: `Python topic: ${tag}` });
 });
 
 bot.match.hashtag('#help', (ctx, tag) => {
-  ctx.sendMessage({ text: `You used the ${tag} hashtag!` });
+  ctx.sendMessage({ text: 'Help requested' });
 });
 ```
 
@@ -48,14 +78,6 @@ bot.match.hashtag('#help', (ctx, tag) => {
 
 - `ctx` - The context object with message data
 - `tag` - The hashtag including # (e.g., `#python`)
-
-## How It Works
-
-The hashtag matcher:
-1. Checks if the message contains `hashtag` entities
-2. Extracts the hashtag text from the message using entity offset and length
-3. Calls registered handlers for matching hashtags
-4. All matching handlers are called (not just the first one)
 
 ## Examples
 
@@ -119,56 +141,6 @@ bot.match.hashtag(/#\w+/, (ctx, tag) => {
 });
 ```
 
-## Message Structure
-
-When a message contains hashtags, Telegram provides entity data:
-
-```js
-{
-  text: "Check out #python and #javascript tips",
-  entities: [
-    { type: "hashtag", offset: 10, length: 7 },   // #python
-    { type: "hashtag", offset: 22, length: 11 }   // #javascript
-  ]
-}
-```
-
-The hashtag matcher extracts these automatically.
-
-## Common Patterns
-
-### Trending Hashtags
-
-```js
-const trendingHashtags = {};
-
-match.hashtag(/#\w+/, (ctx, tag) => {
-  trendingHashtags[tag] = (trendingHashtags[tag] || 0) + 1;
-});
-
-// Get top 5 trending
-const top5 = Object.entries(trendingHashtags)
-  .sort((a, b) => b[1] - a[1])
-  .slice(0, 5);
-```
-
-### Content Organization
-
-```js
-const contentDB = {};
-
-match.hashtag(/#\w+/, (ctx, tag) => {
-  if (!contentDB[tag]) {
-    contentDB[tag] = [];
-  }
-  contentDB[tag].push({
-    user: ctx.from.username,
-    text: ctx.text,
-    timestamp: new Date()
-  });
-});
-```
-
 ### Hashtag Validation
 
 ```js
@@ -184,41 +156,22 @@ bot.match.hashtag(/#\w+/, (ctx, tag) => {
 });
 ```
 
-### Auto-Response by Hashtag
+### With composite plugin
 
 ```js
-const responses = {
-  '#hello': 'Hello there! 👋',
-  '#bye': 'See you later! 👋',
-  '#help': 'How can I assist you?'
-};
-
-bot.match.hashtag(/#\w+/, (ctx, tag) => {
-  if (responses[tag]) {
-    ctx.sendMessage({ text: responses[tag] });
-  }
+// Match hashtags only in public channels
+bot.match.all([
+  { hashtag: /#\w+/ },
+  { chat: /^-100/ }  // Supergroups and channels
+], (ctx, tag) => {
+  ctx.sendMessage({ text: `Channel hashtag: ${tag}` });
 });
 ```
-
-## Entity Structure
-
-Telegram provides hashtag entities with:
-- `type` - Always "hashtag" for this matcher
-- `offset` - Position in text where hashtag starts
-- `length` - Length of the hashtag text (including #)
-
-## Performance Notes
-
-- Hashtag matching is performed on every message
-- Multiple hashtags in one message trigger handler multiple times
-- Consider caching hashtag patterns if tracking many
 
 ## Notes
 
 - Hashtags must start with `#` character
 - Hashtags are case-sensitive in matching
-- Hashtags can contain letters, numbers, and underscores
-- Multiple hashtags in one message are all extracted
+- Multiple hashtags in one message trigger the handler multiple times
 - Works in private chats, groups, and channels
-- Requires message to have text and entities
-- The hashtag includes the # symbol
+- Works with both message text and channel post captions

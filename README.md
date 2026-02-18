@@ -8,9 +8,9 @@ A powerful matching extension for the Telegrambo library that provides flexible 
 
 - [Installation](#installation)
 - [Quick Start](#quick-start)
-- [Features](#features)
 - [Available Plugins](#available-plugins)
-- [API Documentation](#api-documentation)
+- [Quick Plugin Examples](#quick-plugin-examples)
+- [Chaining](#chaining)
 - [Plugin Development Guide](#plugin-development-guide)
 
 <br>
@@ -79,7 +79,6 @@ bot.match.similarity('help', (ctx, text, score) => {
 | `hashtag` | Match #hashtags | No | [DOCS/hashtag.md](DOCS/hashtag.md) |
 | `callbackQuery` | Match callback queries from inline buttons | No | [DOCS/callbackQuery.md](DOCS/callbackQuery.md) |
 | `chatMember` | Match chat member status changes | No | [DOCS/chatMember.md](DOCS/chatMember.md) |
-
 
 ### Quick Plugin Examples
 
@@ -172,7 +171,7 @@ A plugin is an object with event declarations and a handler function:
 ```js
 export default {
   events: ['message', 'edited_message'],
-  plugin: (ctx, check, eventName) => {
+  plugin: (ctx, eventName, plugins) => {
     // Plugin implementation
   }
 }
@@ -184,8 +183,8 @@ export default {
 
 **Plugin function parameters:**
 - `ctx` - The context object with update data
-- `check` - A checker function factory that creates match handlers
 - `eventName` - The name of the current event
+- `plugins` - An object with all registered plugins (for cross-plugin interactions)
 
 ### How It Works
 
@@ -201,20 +200,24 @@ export default {
    });
    ```
 
-3. **Pattern Matching**: Plugin extracts the value to match from the context
-4. **Invoke Checker**: Call `check(matchValue)` which returns a function
-5. **Execute Handlers**: The returned function executes all matching handlers with provided arguments
+3. **Pattern Matching**: Plugin extracts the value to match from the context and returns a matcher function
+4. **Matcher Function**: The returned function checks if pattern matches the value
+5. **Execute Handlers**: If match succeeds, handler is executed with context and matched values
 
 ### Example Plugin: Text Matcher
 
 ```js
 export default {
   events: ['message'],
-  plugin: (ctx, check, eventName) => {
+  plugin: (ctx, eventName, plugins) => {
     // Check if message has text
     if ('text' in ctx) {
       // Create matcher for this text value and execute handlers
-      return check(ctx.text)(ctx, ctx.text);
+      return (pattern, handler) => {
+        if (typeof pattern === 'string' && pattern === ctx.text) {
+          return handler(ctx, ctx.text);
+        }
+      };
     }
   }
 }
@@ -228,7 +231,7 @@ export default {
 4. **Handler Arguments**: Pass context as first argument, then the matched value(s)
 5. **Pattern Support**: Support both string/number patterns and regex patterns
 6. **No Side Effects**: Plugin should not call `bot.on()` - that's handled by `setMatch()`
-7. **Use Check Function**: Always use `check(matchValue)` to invoke registered handlers
+7. **Return Matcher Function**: Always return a function that checks patterns and calls handlers
 
 ### Factory Plugins
 
@@ -242,7 +245,7 @@ export default (options = {}) => {
   // Return the plugin configuration
   return {
     events: ['message'],
-    plugin: (ctx, check, eventName) => {
+    plugin: (ctx, eventName, plugins) => {
       // Implementation using options
     }
   };
